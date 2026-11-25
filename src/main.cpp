@@ -436,6 +436,7 @@ void setup()
   mqttSerial.print("Setting up wifi...");
   setup_wifi();
   ArduinoOTA.setHostname("ESPAltherma");
+  ArduinoOTA.setTimeout(10000);//Default 1 s per chunk aborts updates on a lossy link (-90 dBm, 20-40 % loss)
   ArduinoOTA.onStart([]() {
     busy = true;
     ledSet(LED_OTA);
