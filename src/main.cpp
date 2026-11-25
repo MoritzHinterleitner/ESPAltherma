@@ -442,8 +442,11 @@ void setup()
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
-    mqttSerial.print("Error on OTA - restarting");
-    restart_board();
+    //An aborted transfer (common on a weak link) leaves the running firmware intact, so just carry on.
+    //Rebooting here only added an outage per failed attempt. busy must be cleared, or extraLoop() spins forever.
+    mqttSerial.printf("OTA aborted (error %u), continuing with the current firmware\n", error);
+    busy = false;
+    ledSet(LED_QUERY);
   });
   ArduinoOTA.begin();
 
