@@ -27,6 +27,7 @@
 #include "homeassistant.h"
 #include "mqtt.h"
 #include "restart.h"
+#include "statusled.h"
 
 Converter converter;
 char registryIDs[32]; //Holds the registries to query
@@ -104,6 +105,7 @@ void wakeScreen()
 //can wake the screen even when there is no connection.
 void handleScreen()
 {
+  ledTick();
   M5.update();
 #ifdef ARDUINO_M5Stack_Tough
   bool wakeRequested = M5.Touch.changed;
@@ -120,7 +122,7 @@ void handleScreen()
 }
 #else
 void wakeScreen(){}
-void handleScreen(){}
+void handleScreen(){ ledTick(); }
 #endif
 
 void extraLoop()
@@ -130,6 +132,7 @@ void extraLoop()
   while (busy)
   { //Stop processing during OTA
     ArduinoOTA.handle();
+    ledTick();
   }
   handleScreen();
 }
@@ -189,6 +192,7 @@ void checkWifi()
   if (WiFi.status() == WL_CONNECTED)
     return;
 
+  ledSet(LED_WIFI);
   unsigned long lostTime = millis();
   unsigned long lastAttempt = millis();
   unsigned long lastDot = 0;
@@ -403,6 +407,7 @@ void setupScreen(){
 void setup()
 {
   Serial.begin(115200);
+  ledInit();//white = firmware is booting
   setupScreen();
   MySerial.begin(9600, SERIAL_CONFIG, RX_PIN, TX_PIN);
   pinMode(PIN_THERM, OUTPUT);
@@ -433,6 +438,7 @@ void setup()
   ArduinoOTA.setHostname("ESPAltherma");
   ArduinoOTA.onStart([]() {
     busy = true;
+    ledSet(LED_OTA);
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
@@ -485,6 +491,8 @@ void loop()
     reconnectMqtt();
   }
   //Querying all registries
+  ledSet(LED_QUERY);
+  bool heatPumpAnswered = false;
   for (size_t i = 0; (i < 32) && registryIDs[i] != 0xFF; i++)
   {
     unsigned char buff[64] = {0};
@@ -497,12 +505,14 @@ void loop()
     unsigned char receivedRegistryID = PROTOCOL == 'S' ? buff[0] : buff[1];
     if (registryIDs[i] == receivedRegistryID) //if replied registerID is coherent with the command
     {
+      heatPumpAnswered = true;
       converter.readRegistryValues(buff, PROTOCOL); //process all values from the register
       updateValues(registryIDs[i]);       //send them in mqtt
       //waitLoop(500);//wait .5sec between registries
     }
   }
   sendValues();//Send the full json message
+  ledSet(heatPumpAnswered ? LED_OK : LED_NO_HEATPUMP);
   mqttSerial.printf("Done. Waiting %ld ms...", FREQUENCY - millis() + start);
   waitLoop(FREQUENCY - millis() + start);
 }

@@ -98,6 +98,7 @@ void reconnectMqtt()
     { // No point retrying MQTT without WiFi; recover it first
       checkWifi();
     }
+    ledSet(LED_MQTT);
     mqttSerial.print("Attempting MQTT connection...");
 
     if (client.connect("ESPAltherma-dev", MQTT_USERNAME, MQTT_PASSWORD, MQTT_lwt, 0, true, "Offline"))
