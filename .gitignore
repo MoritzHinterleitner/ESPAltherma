@@ -15,3 +15,6 @@ DaikinLogger.sln
 include/def/mydef.h
 .DS_Store
 include/.DS_Store
+
+# Local credentials (see src/secrets.h.example)
+src/secrets.h

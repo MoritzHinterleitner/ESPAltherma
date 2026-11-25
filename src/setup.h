@@ -1,7 +1,15 @@
 //Setup your credentials and mqtt info here:
 //only change the value between the " " leave the rest of the line untouched.
+// Credentials come from src/secrets.h (gitignored, see src/secrets.h.example).
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+#ifndef WIFI_SSID
 #define WIFI_SSID "SSID"//**Your SSID here**
+#endif
+#ifndef WIFI_PWD
 #define WIFI_PWD "password"//**Your password here** leave empty if open (bad!)
+#endif
 
 //Uncomment this to set a static IP instead of DHCP for the ESP (Separate by commas instead of dots)
 //#define WIFI_IP 192, 168, 0, 5
@@ -10,9 +18,15 @@
 //#define WIFI_PRIMARY_DNS 8, 8, 8, 8     //A DNS address is needed, even if it's not used 
 //#define WIFI_SECONDARY_DNS 8, 8, 4, 4   //A DNS address is needed, even if it's not used
 
+#ifndef MQTT_SERVER
 #define MQTT_SERVER "192.168.1.4"//**IP address here of your MQTT server**
+#endif
+#ifndef MQTT_USERNAME
 #define MQTT_USERNAME ""//leave empty if not set (bad!)
+#endif
+#ifndef MQTT_PASSWORD
 #define MQTT_PASSWORD ""//leave empty if not set (bad!)
+#endif
 #define MQTT_PORT 1883
 //#define MQTT_ENCRYPTED // uncomment if MQTT connection is encrypted via TLS
 
