@@ -48,8 +48,8 @@
 
 #else 
 //Default GPIO PINs for Serial2:
-#define RX_PIN    16 // Pin connected to the TX pin of X10A 
-#define TX_PIN    17 // Pin connected to the RX pin of X10A
+#define RX_PIN    17 // Pin connected to the TX pin of X10A 
+#define TX_PIN    18 // Pin connected to the RX pin of X10A
 #define PIN_THERM 0  // Pin connected to the thermostat relay (normally open)
 #endif
 
@@ -147,7 +147,9 @@
 //#include "def/DEFAULT.h"
 //#include "def/EKHWET-BAV3(Multi DHW tank).h"
 
+
 //#include "def/PROTOCOL_S_ROTEX.h"
+#include "def/PROTOCOL_S_ROTEX_RAW.h"
 //#include "def/PROTOCOL_S.h"
 
 
@@ -158,5 +160,5 @@
 
 // Default to "Protocol I"
 #ifndef PROTOCOL
-#define PROTOCOL 'I'
+#define PROTOCOL 'S'
 #endif
