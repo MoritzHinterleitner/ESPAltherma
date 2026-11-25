@@ -509,6 +509,10 @@ void loop()
   }
   sendValues();//Send the full json message
   ledSet(heatPumpAnswered ? LED_OK : LED_NO_HEATPUMP);
-  mqttSerial.printf("Done. Waiting %ld ms...", FREQUENCY - millis() + start);
-  waitLoop(FREQUENCY - millis() + start);
+  //Wait for the rest of the cycle. If the cycle took longer than FREQUENCY, don't wait:
+  //"FREQUENCY - elapsed" would otherwise wrap around and block for ~49 days.
+  unsigned long elapsed = millis() - start;
+  unsigned long remaining = elapsed < (unsigned long)FREQUENCY ? FREQUENCY - elapsed : 0;
+  mqttSerial.printf("Done. Waiting %lu ms...", remaining);
+  waitLoop(remaining);
 }
