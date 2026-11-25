@@ -29,6 +29,7 @@
 #include "restart.h"
 #include "statusled.h"
 #include "wifimgr.h"
+#include "probe.h"
 
 Converter converter;
 char registryIDs[32]; //Holds the registries to query
@@ -507,6 +508,7 @@ void loop()
       //waitLoop(500);//wait .5sec between registries
     }
   }
+  appendProbes();//Phase 2: raw replies of unexplored registers (only if PROBE_REGISTERS is defined)
   sendValues();//Send the full json message
   ledSet(heatPumpAnswered ? LED_OK : LED_NO_HEATPUMP);
   //Wait for the rest of the cycle. If the cycle took longer than FREQUENCY, don't wait:

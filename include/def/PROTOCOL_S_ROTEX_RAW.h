@@ -46,12 +46,12 @@ LabelDef labelDefs[] = {
     {0x56, 0, 151, 1, -1, "R56_00"},
     {0x56, 1, 151, 1, -1, "R56_01"},
 
-    // ---------- PHASE 2 (later): probe unknown registers, ONE at a time ----------
-    // Unsupported -> log shows "Error 0x15 0xEA". Shorter reply -> "ERR: Time out ... got N/18 bytes" + hex dump in espaltherma/log.
-    // {0x51, 0, 151, 1, -1, "R51_00"},
-    // {0x52, 0, 151, 1, -1, "R52_00"},
-    // {0x57, 0, 151, 1, -1, "R57_00"},
 };
+
+// ---------- PHASE 2 (2026-11-25): probe the registers this file doesn't read ----------
+// See include/probe.h: one READ request per register per cycle, raw reply as hex in the ATTR JSON
+// ("P50".."P5F"), no HA entities. 0x50 is used by the generic PROTOCOL_S.h; the rest is unexplored.
+#define PROBE_REGISTERS 0x50, 0x51, 0x52, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F
 
 // Override protocol
 #define PROTOCOL 'S'
