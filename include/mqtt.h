@@ -87,16 +87,24 @@ void readEEPROM(){
 // recovering while we wait between MQTT connection attempts.
 void handleScreen();
 void checkWifi();
+bool wifiLinkUp();                       // real link state (see wifimgr.h)
+void wifiForceReconnect(const char *why);
+void wifiDiagPublish(PubSubClient &mqtt); // outage stats -> espaltherma/diag
+#define MQTT_FAILS_BEFORE_WIFI_RESET 12     // ~1 min of failures on a link that looks up
+#define MQTT_REBOOT_AFTER_MS (20UL * 60UL * 1000UL)
 
 void reconnectMqtt()
 {
   // Loop until we're reconnected
   int i = 0;
+  unsigned long firstTry = millis();
   while (!client.connected())
   {
-    if (WiFi.status() != WL_CONNECTED)
+    if (!wifiLinkUp())
     { // No point retrying MQTT without WiFi; recover it first
       checkWifi();
+      firstTry = millis();//WiFi has its own reboot timer; restart ours
+      i = 0;
     }
     ledSet(LED_MQTT);
     mqttSerial.print("Attempting MQTT connection...");
@@ -106,6 +114,7 @@ void reconnectMqtt()
       mqttSerial.println("connected!");
       client.publish("homeassistant/sensor/espAltherma/config", "{\"name\":\"AlthermaSensors\",\"stat_t\":\"~/LWT\",\"avty_t\":\"~/LWT\",\"pl_avail\":\"Online\",\"pl_not_avail\":\"Offline\",\"uniq_id\":\"espaltherma\",\"device\":{\"identifiers\":[\"ESPAltherma\"]}, \"~\":\"espaltherma\",\"json_attr_t\":\"~/ATTR\"}", true);
       client.publish(MQTT_lwt, "Online", true);
+      wifiDiagPublish(client);
       client.publish("homeassistant/switch/espAltherma/config", "{\"name\":\"Altherma\",\"cmd_t\":\"~/POWER\",\"stat_t\":\"~/STATE\",\"pl_off\":\"OFF\",\"pl_on\":\"ON\",\"~\":\"espaltherma\"}", true);
 
       publishHomeAssistantDeviceDiscovery();
@@ -146,8 +155,13 @@ void reconnectMqtt()
         delay(10);
       }
 
-      if (i++ == 100) {
-        mqttSerial.printf("Tried for 500 sec, rebooting now.");
+      i++;
+      if (i % MQTT_FAILS_BEFORE_WIFI_RESET == 0)
+      { //The link may only look up (stale status, dead association): reconnect WiFi
+        wifiForceReconnect("MQTT keeps failing");
+      }
+      if (millis() - firstTry >= MQTT_REBOOT_AFTER_MS) {
+        mqttSerial.printf("No MQTT for 20 min, rebooting now.");
         restart_board();
       }
     }

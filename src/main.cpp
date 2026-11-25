@@ -28,6 +28,7 @@
 #include "mqtt.h"
 #include "restart.h"
 #include "statusled.h"
+#include "wifimgr.h"
 
 Converter converter;
 char registryIDs[32]; //Holds the registries to query
@@ -127,12 +128,18 @@ void handleScreen(){ ledTick(); }
 
 void extraLoop()
 {
+#ifndef ARDUINO_ARCH_ESP8266
+  esp_task_wdt_reset();
+#endif
   client.loop();
   ArduinoOTA.handle();
   while (busy)
   { //Stop processing during OTA
     ArduinoOTA.handle();
     ledTick();
+#ifndef ARDUINO_ARCH_ESP8266
+    esp_task_wdt_reset();
+#endif
   }
   handleScreen();
 }
@@ -187,6 +194,11 @@ void get_wifi_bssid(const char *ssid, uint8_t *bssid, uint32_t *wifi_channel)
 }
 #endif
 
+#ifdef ARDUINO_ARCH_ESP8266
+bool wifiLinkUp() { return WiFi.status() == WL_CONNECTED; }
+void wifiForceReconnect(const char *why) { WiFi.disconnect(); }
+void wifiDiagPublish(PubSubClient &mqtt) {}
+
 void checkWifi()
 {
   if (WiFi.status() == WL_CONNECTED)
@@ -207,11 +219,11 @@ void checkWifi()
       lastDot = millis();
     }
     if (millis() - lastAttempt >= 15000)
-    { //Auto-reconnect is not making it: force a full scan so we reattach to the strongest AP
+    {
       Serial.println("\nStill disconnected. Rescanning for strongest AP...");
       WiFi.disconnect();
       delay(100);
-      WiFi.begin(WIFI_SSID, WIFI_PWD, 0, 0, true);
+      WiFi.begin(WIFI_SSID, WIFI_PWD);
       lastAttempt = millis();
     }
     if (millis() - lostTime >= 120000)
@@ -221,19 +233,22 @@ void checkWifi()
     }
   }
 }
-
-#ifndef ARDUINO_ARCH_ESP8266
+void checkWifiRoaming(){}
+#else
 //With several APs sharing the same SSID, the ESP32 stays associated to its AP
-//until the link fully drops, even if a much closer AP is available. Periodically
-//check the signal and reattach to a significantly stronger AP of the same SSID.
-#define ROAM_CHECK_INTERVAL 60000UL
+//until the link fully drops, even if a much closer AP is available. Occasionally
+//check for a significantly stronger AP of the same SSID and reconnect (the WiFi
+//manager then picks the strongest one). A scan takes the radio off-channel for a
+//few seconds, which on a marginal link costs frames, so don't do it often:
+//it used to run every 60 s because the RSSI here is always below -75.
+#define ROAM_CHECK_INTERVAL (15UL * 60UL * 1000UL)
 #define ROAM_RSSI_THRESHOLD -75 //Only consider roaming when weaker than this
 #define ROAM_MIN_IMPROVEMENT 8  //dB gain required to switch AP
 unsigned long lastRoamCheck = 0;
 
 void checkWifiRoaming()
 {
-  if (WiFi.status() != WL_CONNECTED || millis() - lastRoamCheck < ROAM_CHECK_INTERVAL)
+  if (!wifiLinkUp() || millis() - lastRoamCheck < ROAM_CHECK_INTERVAL)
     return;
   lastRoamCheck = millis();
 
@@ -242,35 +257,25 @@ void checkWifiRoaming()
     return;
 
   int16_t n = WiFi.scanNetworks(false, true);
-  int16_t bestIndex = -1;
   int32_t bestRSSI = currentRSSI + ROAM_MIN_IMPROVEMENT;
+  bool better = false;
   for (int16_t i = 0; i < n; i++)
   {
     if (WiFi.SSID(i) == WIFI_SSID && WiFi.RSSI(i) > bestRSSI
         && memcmp(WiFi.BSSID(i), WiFi.BSSID(), 6) != 0)
     {
       bestRSSI = WiFi.RSSI(i);
-      bestIndex = i;
+      better = true;
     }
   }
-  if (bestIndex >= 0)
+  WiFi.scanDelete();
+  if (better)
   {
-    uint8_t bssid[6];
-    memcpy(bssid, WiFi.BSSID(bestIndex), 6);
-    int32_t channel = WiFi.channel(bestIndex);
-    mqttSerial.printf("WiFi weak (%ddBm), roaming to stronger AP (%ddBm, ch%d)\n", currentRSSI, bestRSSI, channel);
-    WiFi.scanDelete();
-    WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PWD, channel, bssid, true);
+    mqttSerial.printf("WiFi weak (%ddBm), a stronger AP is available (%ddBm), reconnecting\n", currentRSSI, bestRSSI);
+    wifiForceReconnect("roaming");
     checkWifi();
   }
-  else
-  {
-    WiFi.scanDelete();
-  }
 }
-#else
-void checkWifiRoaming(){}
 #endif
 
 void setup_wifi()
@@ -301,24 +306,18 @@ void setup_wifi()
     }
   #endif
 
+#ifdef ARDUINO_ARCH_ESP8266
   uint8_t *bssid = nullptr;
   uint32_t wifi_channel = 0;
-#ifdef ARDUINO_ARCH_ESP8266
   get_wifi_bssid(WIFI_SSID, bssid, &wifi_channel);
-#else //assume ESP32
-  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
-#endif
-    
   if (bssid != nullptr)
-  {
     WiFi.begin(WIFI_SSID, WIFI_PWD, wifi_channel, bssid);
-  }
   else
-  {
-    WiFi.begin(WIFI_SSID, WIFI_PWD, 0, 0, true);
-  }
+    WiFi.begin(WIFI_SSID, WIFI_PWD);
   WiFi.setAutoReconnect(true);
+#else
+  wifiInit();//See include/wifimgr.h
+#endif
   checkWifi();
   mqttSerial.printf("Connected. IP Address: %s\n", WiFi.localIP().toString().c_str());
 }
@@ -481,10 +480,7 @@ void waitLoop(uint ms){
 void loop()
 {
   unsigned long start = millis();
-  if (WiFi.status() != WL_CONNECTED)
-  { //restart board if needed
-    checkWifi();
-  }
+  checkWifi();//Returns at once if the link is up; otherwise recovers it (see wifimgr.h)
   checkWifiRoaming();//Move to a stronger AP of the same SSID if signal got weak
   if (!client.connected())
   { //(re)connect to MQTT if needed
