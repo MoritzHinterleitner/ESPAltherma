@@ -79,6 +79,9 @@ std::string makeSensorJson(const LabelDef &label, bool isDiagnostic)
     json += "']";
     json += getConversion(label);
     json += "}}\",";
+    // Values arrive about every 30 s. If none came for 5 min the ESP is gone (it has no LWT-based
+    // availability here), so let HA show the entity as unavailable instead of a frozen last value.
+    json += "\"exp_aft\":300,";
     json += "\"uniq_id\":\"" + uid + "\",";
     json += "\"def_ent_id\":\"";
     json += isBinarySensor ? "binary_sensor." : "sensor.";
