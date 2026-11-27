@@ -459,6 +459,7 @@ void setup()
   #endif
 
   client.setBufferSize(MAX_MSG_SIZE); //to support large json message
+  client.setKeepAlive(60);//default 15 s: the broker drops us after 22 s of silence, too short for a -90 dBm link
   client.setCallback(callback);
   client.setServer(MQTT_SERVER, MQTT_PORT);
 

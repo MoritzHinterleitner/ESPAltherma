@@ -26,6 +26,15 @@ WiFiClient espClient;
 #endif
 PubSubClient client(espClient);
 
+#ifndef ARDUINO_ARCH_ESP8266
+#include <esp_task_wdt.h>
+#endif
+
+// The discovery configs are retained on the broker, so they only need to reach it once per boot.
+// Re-sending ~6 KB on every reconnect over a -90 dBm link kept the session busy past the broker's
+// keepalive limit, so it was dropped mid-publish and the ESP looped reconnect -> discovery -> drop.
+static bool discoverySent = false;
+
 /*
  * Publishes a retained device discovery profile to MQTT, so Home Assistant can auto-configure our device and its sensors.
  */
@@ -112,12 +121,18 @@ void reconnectMqtt()
     if (client.connect("ESPAltherma-dev", MQTT_USERNAME, MQTT_PASSWORD, MQTT_lwt, 0, true, "Offline"))
     {
       mqttSerial.println("connected!");
+      if (!discoverySent)
+      {
       client.publish("homeassistant/sensor/espAltherma/config", "{\"name\":\"AlthermaSensors\",\"stat_t\":\"~/LWT\",\"avty_t\":\"~/LWT\",\"pl_avail\":\"Online\",\"pl_not_avail\":\"Offline\",\"uniq_id\":\"espaltherma\",\"device\":{\"identifiers\":[\"ESPAltherma\"]}, \"~\":\"espaltherma\",\"json_attr_t\":\"~/ATTR\"}", true);
+      }
       client.publish(MQTT_lwt, "Online", true);
       wifiDiagPublish(client);
+      if (!discoverySent)
+      {
       client.publish("homeassistant/switch/espAltherma/config", "{\"name\":\"Altherma\",\"cmd_t\":\"~/POWER\",\"stat_t\":\"~/STATE\",\"pl_off\":\"OFF\",\"pl_on\":\"ON\",\"~\":\"espaltherma\"}", true);
 
       publishHomeAssistantDeviceDiscovery();
+      }
 
       // Subscribe
       client.subscribe("espaltherma/POWER");
@@ -352,10 +367,17 @@ void callback(char *topic, byte *payload, unsigned int length)
 }
 
 // Streams a device-discovery payload chunk straight to the MQTT socket (used as a DiscoverySink).
+struct DiscoveryBuf
+{
+  char *data;
+  size_t len;
+};
+
 static void mqttDiscoverySink(void *ctx, const char *data, size_t len)
 {
-  PubSubClient *c = static_cast<PubSubClient *>(ctx);
-  c->write(reinterpret_cast<const uint8_t *>(data), len);
+  DiscoveryBuf *b = static_cast<DiscoveryBuf *>(ctx);
+  memcpy(b->data + b->len, data, len);
+  b->len += len;
 }
 
 void publishHomeAssistantDeviceDiscovery()
@@ -369,16 +391,34 @@ void publishHomeAssistantDeviceDiscovery()
   mqttSerial.printf("Sending HA discovery: %u sensors, %u bytes\n",
                     (unsigned)(count + 3), (unsigned)payloadLen);
 
-  // Stream the payload directly to the socket. PubSubClient::write() writes straight to the
-  // TCP/TLS client, so the MQTT buffer only needs to hold the topic+header. This avoids the large
-  // contiguous setBufferSize() allocation that previously ran out of heap on bigger definitions.
-  if (!client.beginPublish(topic, payloadLen, true))
+  // Render into one heap buffer and hand it to the socket in a single write, so it goes out as a
+  // few full TCP segments instead of hundreds of tiny ones (each tiny write waited for the lossy link).
+  DiscoveryBuf b = {static_cast<char *>(malloc(payloadLen)), 0};
+  if (!b.data)
   {
-    mqttSerial.println("Error starting device discovery publish!");
+    mqttSerial.println("No heap for device discovery, will retry on the next connect");
     return;
   }
+  streamDeviceDiscoveryPayload(labelDefs, count, mqttDiscoverySink, &b);
 
-  streamDeviceDiscoveryPayload(labelDefs, count, mqttDiscoverySink, &client);
+#ifndef ARDUINO_ARCH_ESP8266
+  esp_task_wdt_reset();
+#endif
+  bool ok = client.beginPublish(topic, payloadLen, true) &&
+            client.write(reinterpret_cast<const uint8_t *>(b.data), b.len) == b.len &&
+            client.endPublish();
+  free(b.data);
+#ifndef ARDUINO_ARCH_ESP8266
+  esp_task_wdt_reset();
+#endif
 
-  client.endPublish();
+  if (ok && client.connected())
+  {
+    discoverySent = true;
+    mqttSerial.println("HA discovery sent");
+  }
+  else
+  {
+    mqttSerial.println("HA discovery failed, will retry on the next connect");
+  }
 }
